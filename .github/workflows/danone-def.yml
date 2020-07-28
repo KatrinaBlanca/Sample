@@ -24,7 +24,7 @@ jobs:
 
     # Runs a single command using the runners shell
     - name: Bump version and push tag
-      uses: hennejg/github-tag-action@v4.1.jh1
+      uses: hennejg/github-tag-action@v4.1.jh5
       with:
         tag_prefix: danone-def-v
         github_token: ${{ secrets.SAMPLE_TOKEN }}
