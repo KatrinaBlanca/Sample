@@ -26,4 +26,5 @@ jobs:
     - name: Bump version and push tag
       uses: hennejg/github-tag-action@v4.1.jh5
       with:
+        release_branches : master
         github_token: ${{ secrets.SAMPLE_TOKEN }}
