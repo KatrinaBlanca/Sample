@@ -1,0 +1,141 @@
+# This is a basic workflow to help you get started with Actions
+
+name: SIT-Create_PR_from_workflow
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the danone-sit branch
+on:
+  schedule:
+  # * is a special character in YAML so you have to quote this string
+  - cron: "*/5 * * * *"
+
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - uses: actions/checkout@v2
+        with:
+          ref: 'danone-sit'
+          fetch-depth: 0
+      
+      # Get the latest code base
+      #- name: Pull the code base
+      #  run: |
+      #     git config pull.ff only
+      #     git pull origin danone-sit
+
+      # Runs a single command using the runners shell
+      - name: Create Branch
+        #id: check_automated_pr_branch
+        run: |
+          dailybranch=`git branch -a | grep sit-metadata-update || true`
+          echo $dailybranch
+          if [[ -z "$dailybranch" ]]; then
+            echo "Automated branch does not exists, creating a new one."
+            git checkout -b sit-metadata-update
+            #echo "::set-output name=automatedpr::$(echo false)"
+          else
+            echo "Automated branch exists, checking out to the branch."
+            git checkout sit-metadata-update
+            git config pull.ff only
+            git pull
+            #echo "::set-output name=automatedpr::$(echo true)"
+          fi
+                
+      # Runs a set of commands using the runners shell
+      - name: Install SFDX CLI
+        run: |
+          sudo npm install -g sfdx-cli@7.71.0
+          
+      - name: Install SF Power Kit Plugin
+        run: |
+          echo 'y' | npx sfdx plugins:install sfpowerkit
+          
+      - name: Login to Org
+        run: 'sfdx sfpowerkit:auth:login -a danonesit -u ${{secrets.SIT_USER}} -p ${{secrets.SIT_PASS}} -r ${{secrets.SIT_URL}}'
+      
+      - name: Retrieve from Org
+        run: |
+          sfdx force:source:retrieve -p force-app -u danonesit
+        
+      - name: Commit Status
+        id: check_for_changes
+        run: |
+          git status
+          changes=`git status | grep "nothing to commit, working tree clean" || true`
+          echo $changes
+          if [[ -z "$changes" ]]; then
+            echo "Branch has changes. Proceeding to add and commit."
+            echo "::set-output name=changes::$(echo true)"
+          else
+            echo "Branch dnoes not have changes. Skipping next steps..."
+            echo "::set-output name=changes::$(echo false)"
+          fi
+          
+      - name: Add to Current Branch
+        if: steps.check_for_changes.outputs.changes == 'true'
+        run: |
+          git config --local user.name devops
+          git config --local user.email devops@github.com
+          git add .
+                    
+      - name: Commit to Current Branch
+        if: steps.check_for_changes.outputs.changes == 'true'
+        run: |
+          git commit -m 'Daily refresh For SIT'
+                
+      - name: Push to Current Branch
+        if: steps.check_for_changes.outputs.changes == 'true'
+        run: |
+          git remote
+          git push --set-upstream origin sit-metadata-update
+      
+      - name: Install GitHub CLI
+        if: steps.check_for_changes.outputs.changes == 'true'
+        run: |
+          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
+          sudo apt-add-repository -u https://cli.github.com/packages
+          sudo apt install gh
+          
+      - name: Check Existing Pull Request
+        id: check_automated_pr
+        run: |
+          pr_exists=`gh pr status | grep "Automated Pull Request" || true`
+          status=`echo $pr_exists | awk -F "-" '{ print $2 }'`
+          status=`echo ${status//[[:blank:]]/}`
+          echo $pr_exists
+          echo $status
+          if [[ -z "$pr_exists" ]]; then
+            # If no PR exists
+            echo "Automated pull request does not exists. Creating a new pull request."
+            echo "::set-output name=automatedpr::$(echo false)"
+          elif [[ ! -z "$pr_exists" ]] && [[ "$status" == "Closed" ]]; then
+            # If PR exists but closed
+            echo "Automated pull request does not exists. Creating a new pull request."
+            echo "::set-output name=automatedpr::$(echo false)"
+          else
+            echo "Automated pull request exists. Will not create\ a new pull request."
+            echo "::set-output name=automatedpr::$(echo true)"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Create Pull Request
+        if: steps.check_automated_pr.outputs.automatedpr == 'false'
+        run: |
+          #!/bin/bash
+          export EDITOR=vi
+          gh pr create --title "Automated Pull Request" --body "Daily refresh For SIT" --base=danone-sit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ github.ref }}
+          
+      
